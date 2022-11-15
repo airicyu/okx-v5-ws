@@ -1,6 +1,6 @@
 {
   "name": "okx-v5-ws",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "This is a non-official OKX V5 websocket SDK for nodejs.",
   "main": "dist/main.js",
   "module": "dist/main.js",

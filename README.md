@@ -4,7 +4,7 @@ This is a non-official [OKX V5 websocket](https://www.okx.com/docs-v5/) SDK for 
 
 # install
 
-npm install okx-v5-ws
+npm i okx-v5-ws
 
 ------------
 
@@ -21,20 +21,24 @@ const run = async () => {
     try {
         const okxV5Ws = new OkxV5Ws({
             serverBaseUrl: OkxV5Ws.DEMO_PUBLIC_ENDPOINT,
-            profileConfig: {
-                apiKey: 'XXXXXX',
-                secretKey: 'YYYYY',
-                passPhrase: 'ZZZZZ',
-            },
+            options: {
+                logLoginMessage: false,
+                logSubscriptionMessage: false,
+                logChannelTopicMessage: false,
+                logTradeMessage: false,
+            }
         })
 
         await okxV5Ws.connect()
 
-        const subResult = await okxV5Ws.subscribeChannel({
+        await okxV5Ws.subscribeChannel({
             channel: 'tickers',
             instId: 'BTC-USDT',
         })
-        console.log(subResult)
+
+        okxV5Ws.addChannelMessageHandler({ channel: 'tickers', instId: 'BTC-USDT' }, (message) => {
+            console.log(`message handler: `, JSON.stringify(message))
+        })
     } catch (e) {
         console.error(e)
     }
@@ -45,16 +49,11 @@ run()
 output
 ```
 WebSocket Client Connected
-send:  {"op":"login","args":[{"apiKey":"XXXXXX","passphrase":"ZZZZZZZ","timestamp":"1668518942","sign":"AAAAAAA"}]}
-Received Login response: '{"event":"login", "msg" : "", "code": "0"}'
 subscribe channel {"channel":"tickers","instId":"BTC-USDT"}
 send:  {"op":"subscribe","args":[{"channel":"tickers","instId":"BTC-USDT"}]}
-Received Sub response: '{"event":"subscribe","arg":{"channel":"tickers","instId":"BTC-USDT"}}'
-{ event: 'subscribe', arg: { channel: 'tickers', instId: 'BTC-USDT' } }
 add ChannelMessageHandler for {"channel":"tickers","instId":"BTC-USDT"}
-message handler:  {"arg":{"channel":"tickers","instId":"BTC-USDT"},"data":[{"instType":"SPOT","instId":"BTC-USDT","last":"16873.2","lastSz":"0.031691","askPx":"16873.2","askSz":"44.29802254","bidPx":"16873.1","bidSz":"46.4672405","open24h":"17151","high24h":"17171.5","low24h":"16035.8","sodUtc0":"16621.7","sodUtc8":"16592.1","volCcy24h":"23439950838.7692894","vol24h":"1406376.80413155","ts":"1668518940833"}]}
-message handler:  {"arg":{"channel":"tickers","instId":"BTC-USDT"},"data":[{"instType":"SPOT","instId":"BTC-USDT","last":"16873.2","lastSz":"0.02995019","askPx":"16873.2","askSz":"44.26807235","bidPx":"16873.1","bidSz":"46.4672405","open24h":"17151","high24h":"17171.5","low24h":"16035.8","sodUtc0":"16621.7","sodUtc8":"16592.1","volCcy24h":"23439951344.12483531","vol24h":"1406376.83408174","ts":"1668518941182"}]}
-message handler:  {"arg":{"channel":"tickers","instId":"BTC-USDT"},"data":[{"instType":"SPOT","instId":"BTC-USDT","last":"16873.2","lastSz":"0.05232543","askPx":"16873.2","askSz":"44.16731862","bidPx":"16873.1","bidSz":"46.4672405","open24h":"17151","high24h":"17171.5","low24h":"16035.8","sodUtc0":"16621.7","sodUtc8":"16592.1","volCcy24h":"23439953044.16267235","vol24h":"1406376.93483547","ts":"1668518941291"}]}
+message handler:  {"arg":{"channel":"tickers","instId":"BTC-USDT"},"data":[{"instType":"SPOT","instId":"BTC-USDT","last":"16911","lastSz":"27.6688588","askPx":"16912.3","askSz":"0.0001","bidPx":"16910.5","bidSz":"43.30579595","open24h":"16641.8","high24h":"17121.3","low24h":"16035.8","sodUtc0":"16621.7","sodUtc8":"16592.1","volCcy24h":"22694273441.21289897","vol24h":"1359475.31206937","ts":"1668524928148"}]}
+message handler:  {"arg":{"channel":"tickers","instId":"BTC-USDT"},"data":[{"instType":"SPOT","instId":"BTC-USDT","last":"16910.5","lastSz":"0.03735514","askPx":"16912.3","askSz":"0.0001","bidPx":"16910.5","bidSz":"43.22660886","open24h":"16641.8","high24h":"17121.3","low24h":"16035.8","sodUtc0":"16621.7","sodUtc8":"16592.1","volCcy24h":"22694274780.30618442","vol24h":"1359475.39125646","ts":"1668524928264"}]}
 ...
 ...
 ...
@@ -65,6 +64,56 @@ This module basically has some managed method to help you do:
 - Subscribe to channel topic, and receive messages
 - Send Trade message, and receive response
 - Ping Pong / Auto reconnect
+
+------
+
+## Sample for Private Endpoint Usage
+
+Basically similar to previous hello world. But we pass `profileConfig` values during creating `OkxV5Ws` instance.
+
+```javascript
+const run = async () => {
+    try {
+        const okxV5Ws = new OkxV5Ws({
+            serverBaseUrl: OkxV5Ws.DEMO_PRIVATE_ENDPOINT,
+            profileConfig: {
+                apiKey: 'AAAAA',
+                secretKey: 'BBBBB',
+                passPhrase: 'CCCCCC',
+            },
+            options: {
+                logLoginMessage: false,
+                logSubscriptionMessage: false,
+                logChannelTopicMessage: false,
+                logTradeMessage: false,
+            },
+        })
+
+        await okxV5Ws.connect()
+
+        await okxV5Ws.subscribeChannel({
+            channel: 'account',
+            ccy: 'USDT',
+        })
+
+        okxV5Ws.addChannelMessageHandler({ channel: 'account', ccy: 'USDT' }, (message) => {
+            console.log(`message handler: `, JSON.stringify(message))
+        })
+    } catch (e) {
+        console.error(e)
+    }
+}
+run()
+```
+
+output:
+```
+WebSocket Client Connected
+send:  {"op":"login","args":[{"apiKey":"AAAAA","passphrase":"CCCCC","timestamp":"1668525060","sign":"XXXXXXX"}]}
+subscribe channel {"channel":"account","ccy":"USDT"}
+send:  {"op":"subscribe","args":[{"channel":"account","ccy":"USDT"}]}
+add ChannelMessageHandler for {"channel":"account","ccy":"USDT"}
+```
 
 ------
 
