@@ -4,7 +4,11 @@ import { WSConnector } from './WSConnector'
 import { ErrorCodes } from './ErrorCodes'
 import { v4 as uuidv4 } from 'uuid'
 import { normalizeSubscriptionTopic } from './util'
+import EventEmitter from 'events'
 
+/**
+ * Provide service level function to user
+ */
 class OkxV5Ws {
     #serverBaseUrl: string
     #profileConfig?: {
@@ -20,9 +24,11 @@ class OkxV5Ws {
         logTradeMessage: boolean
     }
 
+    // ws connection handling instance
     #wsConnector: WSConnector
 
-    #messageHandler?: (message: string) => any
+    // events connector
+    #eventEmitter = new EventEmitter()
 
     /**
      * Queues for piping operation one by one
@@ -37,6 +43,9 @@ class OkxV5Ws {
     #tradeReqsMap = new Map<string, Map<string, HandleResponse<TradeResponse>[]>>()
     #channelTopicMessageHandlersMap = new Map<string, ChannelMessageHandler[]>()
 
+    /**
+     * map of Trade OP codes
+     */
     static #tradeOps = {
         order: true,
         'batch-orders': true,
@@ -51,6 +60,9 @@ class OkxV5Ws {
     static DEMO_PUBLIC_ENDPOINT = 'wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999'
     static DEMO_PRIVATE_ENDPOINT = 'wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999'
 
+    /**
+     * constructor
+     */
     constructor({
         serverBaseUrl,
         profileConfig,
@@ -82,23 +94,68 @@ class OkxV5Ws {
             logTradeMessage: options?.logTradeMessage ?? true,
         }
 
+        /**
+         * initialize WSConnector
+         */
         this.#wsConnector = new WSConnector({
             serverBaseUrl: this.#serverBaseUrl,
             afterConnected: this.#afterConnected,
-            messageHandler: this.#onMessage,
         })
-        this.#messageHandler = messageHandler
+
+        /**
+         * connecting the events
+         */
+        this.#wsConnector.event.on('message', this.#onMessage)
+        this.#wsConnector.event.on('connect', (code: number, desc: string) => {
+            this.#eventEmitter.emit('connect', code, desc)
+        })
+        this.#wsConnector.event.on('reconnecting', () => {
+            this.#eventEmitter.emit('reconnecting')
+        })
+        this.#wsConnector.event.on('close', (code: number, desc: string) => {
+            this.#eventEmitter.emit('close', code, desc)
+        })
+        this.#wsConnector.event.on('closed', (code: number, desc: string) => {
+            this.#eventEmitter.emit('closed', code, desc)
+        })
+        this.#wsConnector.event.on('error', (error) => this.#eventEmitter.emit('error', error))
+
+        if (messageHandler) {
+            console.warn('messageHandler is deprecated. Please use okxV5Ws.event on message event')
+            this.#eventEmitter.on('message', messageHandler)
+        }
     }
 
+    /**
+     * Get the event emitter
+     */
+    get event() {
+        return this.#eventEmitter
+    }
+
+    /**
+     * start connecting to server
+     */
     async connect() {
         await this.#wsConnector.connect()
     }
 
+    /**
+     * sending message payload to server
+     *
+     * @param payload
+     */
     async send(payload: object) {
         this.#checkConnection()
         await this.#wsConnector.send(JSON.stringify(payload))
     }
 
+    /**
+     * subscribe channel topic
+     *
+     * @param subscriptionTopic
+     * @returns
+     */
     async subscribeChannel(subscriptionTopic: SubscriptionTopic): Promise<SubscriptionResponse> {
         return this.#waitOperationQueue<SubscriptionResponse>(this.#operationQueue, 'subscribe', async () => {
             const topic = normalizeSubscriptionTopic(subscriptionTopic)
@@ -120,6 +177,12 @@ class OkxV5Ws {
         })
     }
 
+    /**
+     * unsubscribe channel topic
+     *
+     * @param subscriptionTopic
+     * @returns
+     */
     async unsubscribeChannel(subscriptionTopic: SubscriptionTopic): Promise<UnsubscriptionResponse> {
         return this.#waitOperationQueue<UnsubscriptionResponse>(this.#operationQueue, 'unsubscribe', async () => {
             const topic = normalizeSubscriptionTopic(subscriptionTopic)
@@ -141,6 +204,12 @@ class OkxV5Ws {
         })
     }
 
+    /**
+     * Add channel topic message handler
+     *
+     * @param subscriptionTopic
+     * @param channelMessageHandler
+     */
     addChannelMessageHandler(subscriptionTopic: SubscriptionTopic, channelMessageHandler: ChannelMessageHandler) {
         const topic = normalizeSubscriptionTopic(subscriptionTopic)
         console.log(`add ChannelMessageHandler for ${JSON.stringify(topic)}`)
@@ -154,6 +223,12 @@ class OkxV5Ws {
         }
     }
 
+    /**
+     * Remove channel topic message handler
+     *
+     * @param subscriptionTopic
+     * @param channelMessageHandler
+     */
     removeChannelMessageHandler(subscriptionTopic: SubscriptionTopic, channelMessageHandler: ChannelMessageHandler) {
         const topic = normalizeSubscriptionTopic(subscriptionTopic)
         console.log(`remove ChannelMessageHandler for ${JSON.stringify(topic)}`)
@@ -169,6 +244,11 @@ class OkxV5Ws {
         }
     }
 
+    /**
+     * Remove that channel topic's ALL message handler
+     *
+     * @param subscriptionTopic
+     */
     removeAllChannelMessageHandler(subscriptionTopic: SubscriptionTopic) {
         const topic = normalizeSubscriptionTopic(subscriptionTopic)
         console.log(`removeAll ChannelMessageHandler for ${JSON.stringify(topic)}`)
@@ -176,6 +256,12 @@ class OkxV5Ws {
         this.#channelTopicMessageHandlersMap.delete(key)
     }
 
+    /**
+     * Send trade op message
+     *
+     * @param payload
+     * @returns
+     */
     async trade(payload: TradePayload): Promise<TradeResponse> {
         const op = payload.op
 
@@ -213,6 +299,10 @@ class OkxV5Ws {
 
     /**
      * Waiting the operation in a single processing queue
+     * @param operationQueue
+     * @param op
+     * @param process
+     * @returns
      */
     async #waitOperationQueue<T>(operationQueue: OperationQueueItem[], op: string, process: () => Promise<T>): Promise<T> {
         return new Promise<T>((resolve, reject) => {
@@ -242,6 +332,8 @@ class OkxV5Ws {
 
     /**
      * Remove the first item in queue. And pull next operation to run.
+     * @param operationQueue
+     * @returns
      */
     async #pullNextOperation(operationQueue: OperationQueueItem[]): Promise<void> {
         if (operationQueue.length === 0) {
@@ -255,6 +347,9 @@ class OkxV5Ws {
         return
     }
 
+    /**
+     * check connection connected
+     */
     #checkConnection() {
         if (!this.#wsConnector.connected) {
             throw new Error('Connection not available')
@@ -262,7 +357,7 @@ class OkxV5Ws {
     }
 
     /**
-     * Do login authentication
+     * Do login authentication handshake
      */
     async #authentication(): Promise<LoginResponse> {
         return this.#waitOperationQueue<LoginResponse>(this.#operationQueue, 'login', async () => {
@@ -292,6 +387,9 @@ class OkxV5Ws {
         })
     }
 
+    /**
+     * After-connected-logic, probably do auto login
+     */
     #afterConnected = async () => {
         // reset queues
         this.#operationQueue = []
@@ -299,15 +397,19 @@ class OkxV5Ws {
         this.#subChannelReqs = []
         this.#tradeReqsMap = new Map<string, Map<string, HandleResponse<TradeResponse>[]>>()
         this.#channelTopicMessageHandlersMap = new Map<string, ChannelMessageHandler[]>()
+
         if (this.#options.autoLogin && this.#profileConfig?.apiKey) {
             await this.#authentication()
         }
     }
 
+    /**
+     * Handle when receiving server side messages
+     * @param message
+     * @returns
+     */
     #onMessage = (message: string) => {
-        if (this.#messageHandler) {
-            this.#messageHandler(message)
-        }
+        this.#eventEmitter.emit('message', message)
 
         if (message === 'pong') {
             return
@@ -386,6 +488,9 @@ class OkxV5Ws {
                 eventType = 'trade'
             }
 
+            /**
+             * Handle for "login" message response
+             */
             if (eventType === 'login') {
                 if (this.#options.logLoginMessage) {
                     console.debug(`Received Login response: '${message}'`)
@@ -401,6 +506,9 @@ class OkxV5Ws {
                 return
             }
 
+            /**
+             * Handle for "subscribe" message response
+             */
             if (eventType === 'subscribe') {
                 if (this.#options.logLoginMessage) {
                     console.debug(`Received Sub response: '${message}'`)
@@ -416,6 +524,9 @@ class OkxV5Ws {
                 return
             }
 
+            /**
+             * Handle for "unsubscribe" message response
+             */
             if (eventType === 'unsubscribe') {
                 if (this.#options.logLoginMessage) {
                     console.debug(`Received Unsub response: '${message}'`)
@@ -431,6 +542,9 @@ class OkxV5Ws {
                 return
             }
 
+            /**
+             * Handle for "trade" message response
+             */
             if (eventType === 'trade') {
                 const id = messageObj.id
                 if (this.#options.logTradeMessage) {
@@ -459,6 +573,9 @@ class OkxV5Ws {
         }
     }
 
+    /**
+     * close connection
+     */
     close() {
         this.#wsConnector.close()
     }

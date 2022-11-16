@@ -138,9 +138,10 @@ const okxV5Ws = new OkxV5Ws({
         logChannelTopicMessage: false,
         logTradeMessage: false,
     },
-    messageHandler: (message: string) => {
-        console.log(`Received message: ${message}`)
-    },
+})
+
+await okxV5Ws.event.on('message', (message: string) => {
+    console.log(`Received message: ${message}`)
 })
 
 await okxV5Ws.connect()
@@ -193,7 +194,6 @@ class OkxV5Ws {
             logChannelTopicMessage?: boolean // console log for Channel Topic messages?
             logTradeMessage?: boolean // console log for Trade Response messages?
         }
-        messageHandler?: (message: string) => any // you can pass global message handler here
     }) {
         /* ... */
     }
@@ -263,6 +263,66 @@ async trade(payload: TradePayload): Promise<TradeResponse>
 ```javascript
 close()
 ```
+
+### Event handle
+
+`okxV5Ws.event` is a event emitter. You can register several event handler to it.
+
+```javascript
+await okxV5Ws.event.on('message', (message: string) => {
+    console.log(`Received message: ${message}`)
+})
+```
+-------------
+
+## Events
+
+### message
+
+Fire when server side push any messages.
+
+Event handler: (message: string) => any
+
+------
+
+### connect
+
+Fire when our client connected/reconnected
+
+Event handler: () => any
+
+------
+
+### reconnecting
+
+Fire when our client start to try reconnecting
+
+Event handler: () => any
+
+------
+
+### close
+
+Fire when connection close
+
+Event handler: (code: number, desc: string) => any
+
+------
+
+### closed
+
+Fire when connection close and we are not going to reconnect.
+This event may trigger when user call the `close` method. Or server side close connection with code=1000.
+
+Event handler: (code: number, desc: string) => any
+
+------
+
+### error
+
+Fire when connection error happened.
+
+Event handler: () => any
 
 -------------
 

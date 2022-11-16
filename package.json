@@ -1,6 +1,6 @@
 {
   "name": "okx-v5-ws",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "This is a non-official OKX V5 websocket SDK for nodejs.",
   "main": "dist/main.js",
   "module": "dist/main.js",
@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "crypto-js": "^4.1.1",
+    "events": "^3.3.0",
     "uuid": "^9.0.0",
     "websocket": "^1.0.34"
   }

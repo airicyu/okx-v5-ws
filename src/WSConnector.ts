@@ -1,34 +1,42 @@
 import websocket, { IStringified } from 'websocket'
 const WebSocketClient = websocket.client
 import { sleep } from './util'
+import EventEmitter from 'events'
 
+/**
+ * Handle WS connection level logic
+ */
 class WSConnector {
     #serverBaseUrl: string
 
+    // connection state
     #connectState: 'closed' | 'connecting' | 'connected' | 'reconnecting' = 'closed'
 
+    /* reconnect state data */
     #reconnectionAttempts = 0
     #reconnectionMaxAttempts = Infinity
+
+    /* WS connection instances */
     #connection: websocket.connection | null = null
     #client = new WebSocketClient()
-    #messageHandler: (message: string) => void
+
+    // after-connected handler
     #afterConnected: () => Promise<void>
+
+    /* states & timers for handle ping pong */
     #pingTimer: any = null
     #waitPongTimer: any = null
     #lastMessageReceiveTimestamp: number
 
-    constructor({
-        serverBaseUrl,
-        afterConnected,
-        messageHandler,
-    }: {
-        serverBaseUrl: string
-        afterConnected: () => Promise<void>
-        messageHandler: (message: string) => void
-    }) {
+    // events connector
+    #eventEmitter = new EventEmitter()
+
+    /**
+     * constructor
+     */
+    constructor({ serverBaseUrl, afterConnected }: { serverBaseUrl: string; afterConnected: () => Promise<void> }) {
         this.#serverBaseUrl = serverBaseUrl
         this.#afterConnected = afterConnected
-        this.#messageHandler = messageHandler
         this.#lastMessageReceiveTimestamp = Date.now()
 
         this.#client.on('connectFailed', function (error) {
@@ -41,28 +49,45 @@ class WSConnector {
             this.#reconnectionAttempts = 0
 
             console.log('WebSocket Client Connected')
+
             connection.on('error', (error: Error) => {
-                console.log('Connection Error: ' + error.toString())
+                console.error('Connection Error: ' + error.toString())
+                this.#eventEmitter.emit('error', error)
             })
+
             connection.on('close', (code: number, desc: string) => {
+                this.#eventEmitter.emit('close', code, desc)
+                // reset ping pong state
                 clearInterval(this.#pingTimer)
                 clearInterval(this.#waitPongTimer)
+
                 console.log(`Connection Closed. code=${code}, desc=${desc}`)
                 this.#connectState = 'closed'
                 if (code !== 1000) {
                     this.reconnect()
+                } else {
+                    this.#eventEmitter.emit('closed', code, desc)
                 }
             })
+
             connection.on('message', (message) => {
+                // reset ping pong state
                 this.#lastMessageReceiveTimestamp = Date.now()
                 clearTimeout(this.#pingTimer)
                 clearTimeout(this.#waitPongTimer)
                 this.#pingTimer = setTimeout(this.#ping, 15_000)
+
                 if (message.type === 'utf8') {
-                    this.#messageHandler(message.utf8Data)
+                    this.#eventEmitter.emit('message', message.utf8Data)
                 }
             })
+
+            this.#eventEmitter.emit('connect')
         })
+    }
+
+    get event() {
+        return this.#eventEmitter
     }
 
     get connected() {
@@ -73,6 +98,9 @@ class WSConnector {
         return this.#connection
     }
 
+    /**
+     * connect to server
+     */
     async connect(): Promise<boolean> {
         if (this.#connectState === 'connected') {
             return true
@@ -102,10 +130,15 @@ class WSConnector {
             .then(() => true)
     }
 
+    /**
+     * do reconnect
+     */
     async reconnect(): Promise<void> {
         if (this.#connectState === 'connected' || this.#connectState === 'reconnecting') {
             return
         }
+
+        this.#eventEmitter.emit('reconnect')
 
         this.#connectState = 'reconnecting'
 
@@ -115,9 +148,9 @@ class WSConnector {
             })
             ;(async () => {
                 while (this.#connectState === 'reconnecting' && this.#reconnectionAttempts < this.#reconnectionMaxAttempts) {
+                    await sleep(5000)
                     this.#reconnectionAttempts++
                     await this.connect()
-                    await sleep(5000)
                 }
                 if (this.#connectState === 'reconnecting') {
                     reject(new Error('Reconnet fail after all attempts'))
@@ -126,6 +159,12 @@ class WSConnector {
         })
     }
 
+    /**
+     * send message to server
+     *
+     * @param data
+     * @returns
+     */
     async send(data: Buffer | IStringified): Promise<void> {
         console.debug('send: ', data)
         return new Promise((resolve, reject) => {
@@ -139,10 +178,16 @@ class WSConnector {
         })
     }
 
+    /**
+     * close connection
+     */
     close = () => {
         this.#connection?.close(1000)
     }
 
+    /**
+     * send ping and wait pong or disconnect
+     */
     #ping = async () => {
         if (this.#connectState === 'connected') {
             clearTimeout(this.#waitPongTimer)
