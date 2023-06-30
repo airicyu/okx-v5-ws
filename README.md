@@ -334,9 +334,9 @@ Due to the fact that we are not able to linking some operation request and the c
 
 ----
 
-## Request/Response stack is not yet stable
+## Request/Response queue is not yet stable
 
-Our design is try to use request stack to hold the requests. And when we matched response message received from server, we unstack and then response to user. So if there are bugs occurring that causing us missed the matching of response pattern, then the request in the stack would hang up.
+Our design is try to use request queue to hold the requests. And when we matched response message received from server, we lookup and then response to user. So if there are bugs occurring that causing us missed the matching of response pattern, then the request in the queue would hang up.
 
 In order to prevent this issue, you can fully use the "Free Control Style" to send/handle message by yourself. Such usage would be more stable.
 
